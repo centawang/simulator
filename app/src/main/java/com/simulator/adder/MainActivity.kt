@@ -65,6 +65,7 @@ fun AdderScreen(modifier: Modifier = Modifier) {
     var result by remember { mutableStateOf<String?>(null) }
     var addendA by remember { mutableStateOf<Long?>(null) }
     var addendB by remember { mutableStateOf<Long?>(null) }
+    var operation by remember { mutableStateOf("+") }
     var firstError by remember { mutableStateOf(false) }
     var secondError by remember { mutableStateOf(false) }
 
@@ -76,7 +77,7 @@ fun AdderScreen(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "Integer Adder",
+            text = "Integer Calculator",
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -123,18 +124,38 @@ fun AdderScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Button(onClick = {
-            val a = firstNumber.trim().toLongOrNull()
-            val b = secondNumber.trim().toLongOrNull()
-            firstError = a == null
-            secondError = b == null
-            if (a != null && b != null) {
-                addendA = a
-                addendB = b
-                result = "${a + b}"
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Button(onClick = {
+                val a = firstNumber.trim().toLongOrNull()
+                val b = secondNumber.trim().toLongOrNull()
+                firstError = a == null
+                secondError = b == null
+                if (a != null && b != null) {
+                    addendA = a
+                    addendB = b
+                    operation = "+"
+                    result = "${a + b}"
+                }
+            }) {
+                Text("Add")
             }
-        }) {
-            Text("Add")
+
+            Button(onClick = {
+                val a = firstNumber.trim().toLongOrNull()
+                val b = secondNumber.trim().toLongOrNull()
+                firstError = a == null
+                secondError = b == null
+                if (a != null && b != null) {
+                    addendA = a
+                    addendB = -b
+                    operation = "\u2212"
+                    result = "${a - b}"
+                }
+            }) {
+                Text("Subtract")
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -284,9 +305,10 @@ fun AdderScreen(modifier: Modifier = Modifier) {
                             cap = StrokeCap.Round
                         )
 
-                        // Label on the arc: "+b"
+                        // Label on the arc showing the operation
                         drawContext.canvas.nativeCanvas.apply {
-                            val label = if (b > 0) "+$b" else "$b"
+                            val displayB = abs(b)
+                            val label = if (b > 0) "+$displayB" else "\u2212$displayB"
                             val paint = android.graphics.Paint().apply {
                                 color = tertiaryColor.hashCode()
                                 textSize = 30f
