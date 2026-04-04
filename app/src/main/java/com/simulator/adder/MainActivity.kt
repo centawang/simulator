@@ -20,15 +20,24 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -68,6 +77,29 @@ fun AdderScreen(modifier: Modifier = Modifier) {
     var operation by remember { mutableStateOf("+") }
     var firstError by remember { mutableStateOf(false) }
     var secondError by remember { mutableStateOf(false) }
+    var animationStep by remember { mutableIntStateOf(0) }
+    var animationTrigger by remember { mutableIntStateOf(0) }
+    var isPaused by remember { mutableStateOf(false) }
+    var speedMultiplier by remember { mutableFloatStateOf(1f) }
+
+    // Animate: step through +1 arcs, then show the summary arc
+    LaunchedEffect(animationTrigger) {
+        val b = addendB
+        if (b != null && b != 0L) {
+            val totalSteps = abs(b).toInt()
+            animationStep = 0
+            isPaused = false
+            for (i in 1..totalSteps + 1) {
+                // Wait while paused
+                if (isPaused) {
+                    snapshotFlow { isPaused }.first { !it }
+                }
+                val baseDelay = max(80L, 500L / max(totalSteps.toLong(), 1L))
+                delay((baseDelay / speedMultiplier).toLong().coerceAtLeast(30L))
+                animationStep = i
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -133,10 +165,12 @@ fun AdderScreen(modifier: Modifier = Modifier) {
                 firstError = a == null
                 secondError = b == null
                 if (a != null && b != null) {
+                    animationStep = 0
                     addendA = a
                     addendB = b
                     operation = "+"
                     result = "${a + b}"
+                    animationTrigger++
                 }
             }) {
                 Text("Add")
@@ -148,10 +182,12 @@ fun AdderScreen(modifier: Modifier = Modifier) {
                 firstError = a == null
                 secondError = b == null
                 if (a != null && b != null) {
+                    animationStep = 0
                     addendA = a
                     addendB = -b
                     operation = "\u2212"
                     result = "${a - b}"
+                    animationTrigger++
                 }
             }) {
                 Text("Subtract")
@@ -183,6 +219,39 @@ fun AdderScreen(modifier: Modifier = Modifier) {
                 text = "Number Line",
                 style = MaterialTheme.typography.titleMedium
             )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Animation controls: Restart, Pause/Resume, Speed
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(onClick = {
+                    animationStep = 0
+                    isPaused = false
+                    animationTrigger++
+                }) {
+                    Text("\u21BB Restart")
+                }
+
+                OutlinedButton(onClick = { isPaused = !isPaused }) {
+                    Text(if (isPaused) "\u25B6 Resume" else "\u23F8 Pause")
+                }
+
+                Text(
+                    text = "Speed: ${"%,.1f".format(speedMultiplier)}x",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+                Slider(
+                    value = speedMultiplier,
+                    onValueChange = { speedMultiplier = it },
+                    valueRange = 0.25f..4f,
+                    steps = 14,
+                    modifier = Modifier.width(140.dp)
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -259,63 +328,125 @@ fun AdderScreen(modifier: Modifier = Modifier) {
                         center = Offset(valueToX(a), baseY)
                     )
 
-                    // Draw dot at result (sum)
+                    val absB = abs(b).toInt()
+                    val direction = if (b > 0) 1 else -1
+                    val stepsShown = min(animationStep, absB)
+                    val showSummary = animationStep > absB
+
+                    // Draw progressive red dot at current position
+                    val currentPos = a + direction.toLong() * stepsShown
+                    val dotPos = if (showSummary) sum else currentPos
                     drawCircle(
                         color = errorColor,
                         radius = 10f,
-                        center = Offset(valueToX(sum), baseY)
+                        center = Offset(valueToX(dotPos), baseY)
                     )
 
-                    // Draw arc arrow from a to sum
+                    // Draw individual +1 / −1 arcs
                     if (b != 0L) {
-                        val startX = valueToX(a)
-                        val endX = valueToX(sum)
-                        val arcHeight = min(abs(b).toFloat() * pxPerUnit * 0.4f, h * 0.45f)
-                        val midX = (startX + endX) / 2f
+                        val unitArcHeight = pxPerUnit * 0.35f
+                        for (i in 0 until stepsShown) {
+                            val arcStart = a + direction.toLong() * i
+                            val arcEnd = arcStart + direction.toLong()
+                            val sx = valueToX(arcStart)
+                            val ex = valueToX(arcEnd)
 
-                        val arcPath = Path().apply {
-                            moveTo(startX, baseY)
-                            cubicTo(
-                                startX, baseY - arcHeight,
-                                endX, baseY - arcHeight,
-                                endX, baseY
-                            )
-                        }
-                        drawPath(
-                            path = arcPath,
-                            color = tertiaryColor,
-                            style = Stroke(width = 3f, cap = StrokeCap.Round)
-                        )
-
-                        // Arrowhead at the end
-                        val arrowSize = 12f
-                        val arrowDir = if (b > 0) -1f else 1f
-                        drawLine(
-                            color = tertiaryColor,
-                            start = Offset(endX, baseY),
-                            end = Offset(endX + arrowDir * arrowSize, baseY - arrowSize),
-                            strokeWidth = 3f,
-                            cap = StrokeCap.Round
-                        )
-                        drawLine(
-                            color = tertiaryColor,
-                            start = Offset(endX, baseY),
-                            end = Offset(endX + arrowDir * arrowSize, baseY + arrowSize * 0.3f),
-                            strokeWidth = 3f,
-                            cap = StrokeCap.Round
-                        )
-
-                        // Label on the arc showing the operation
-                        drawContext.canvas.nativeCanvas.apply {
-                            val displayB = abs(b)
-                            val label = if (b > 0) "+$displayB" else "\u2212$displayB"
-                            val paint = android.graphics.Paint().apply {
-                                color = tertiaryColor.hashCode()
-                                textSize = 30f
-                                textAlign = android.graphics.Paint.Align.CENTER
-                                isFakeBoldText = true
+                            val unitPath = Path().apply {
+                                moveTo(sx, baseY)
+                                cubicTo(
+                                    sx, baseY - unitArcHeight,
+                                    ex, baseY - unitArcHeight,
+                                    ex, baseY
+                                )
                             }
-                            drawText(label, midX, baseY - arcHeight + 4f, paint)
+                            drawPath(
+                                path = unitPath,
+                                color = tertiaryColor.copy(alpha = 0.6f),
+                                style = Stroke(width = 2f, cap = StrokeCap.Round)
+                            )
+
+                            // Arrowhead
+                            val arrowSize = 8f
+                            val arrowDir = if (b > 0) -1f else 1f
+                            drawLine(
+                                color = tertiaryColor.copy(alpha = 0.6f),
+                                start = Offset(ex, baseY),
+                                end = Offset(ex + arrowDir * arrowSize, baseY - arrowSize),
+                                strokeWidth = 2f,
+                                cap = StrokeCap.Round
+                            )
+                            drawLine(
+                                color = tertiaryColor.copy(alpha = 0.6f),
+                                start = Offset(ex, baseY),
+                                end = Offset(ex + arrowDir * arrowSize, baseY + arrowSize * 0.3f),
+                                strokeWidth = 2f,
+                                cap = StrokeCap.Round
+                            )
+
+                            // +1 / −1 label
+                            drawContext.canvas.nativeCanvas.apply {
+                                val unitLabel = if (b > 0) "+1" else "\u22121"
+                                val paint = android.graphics.Paint().apply {
+                                    color = tertiaryColor.copy(alpha = 0.6f).hashCode()
+                                    textSize = 20f
+                                    textAlign = android.graphics.Paint.Align.CENTER
+                                }
+                                drawText(unitLabel, (sx + ex) / 2f, baseY - unitArcHeight + 2f, paint)
+                            }
+                        }
+
+                        // Draw summary arc after all +1 arcs are done
+                        if (showSummary) {
+                            val startX = valueToX(a)
+                            val endX = valueToX(sum)
+                            val arcHeight = min(abs(b).toFloat() * pxPerUnit * 0.4f, h * 0.45f)
+                                .coerceAtLeast(pxPerUnit * 0.55f) // taller than the +1 arcs
+                            val midX = (startX + endX) / 2f
+
+                            val arcPath = Path().apply {
+                                moveTo(startX, baseY)
+                                cubicTo(
+                                    startX, baseY - arcHeight,
+                                    endX, baseY - arcHeight,
+                                    endX, baseY
+                                )
+                            }
+                            drawPath(
+                                path = arcPath,
+                                color = tertiaryColor,
+                                style = Stroke(width = 3f, cap = StrokeCap.Round)
+                            )
+
+                            // Arrowhead at the end
+                            val arrowSize = 12f
+                            val arrowDir = if (b > 0) -1f else 1f
+                            drawLine(
+                                color = tertiaryColor,
+                                start = Offset(endX, baseY),
+                                end = Offset(endX + arrowDir * arrowSize, baseY - arrowSize),
+                                strokeWidth = 3f,
+                                cap = StrokeCap.Round
+                            )
+                            drawLine(
+                                color = tertiaryColor,
+                                start = Offset(endX, baseY),
+                                end = Offset(endX + arrowDir * arrowSize, baseY + arrowSize * 0.3f),
+                                strokeWidth = 3f,
+                                cap = StrokeCap.Round
+                            )
+
+                            // Label on the arc showing the operation
+                            drawContext.canvas.nativeCanvas.apply {
+                                val displayB = abs(b)
+                                val label = if (b > 0) "+$displayB" else "\u2212$displayB"
+                                val paint = android.graphics.Paint().apply {
+                                    color = tertiaryColor.hashCode()
+                                    textSize = 30f
+                                    textAlign = android.graphics.Paint.Align.CENTER
+                                    isFakeBoldText = true
+                                }
+                                drawText(label, midX, baseY - arcHeight + 4f, paint)
+                            }
                         }
                     }
                 }
